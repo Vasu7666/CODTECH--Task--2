@@ -1,0 +1,205 @@
+mkdir online_marketplace
+cd online_marketplace
+npm init -y
+npm install express mongoose bcrypt jsonwebtoken multer stripe react react-dom
+const express = require('express');
+const mongoose = require('mongoose');
+const app = express();
+
+// MongoDB Connection
+mongoose.connect('mongodb://localhost/online_marketplace', { useNewUrlParser: true, useUnifiedTopology: true });
+
+// Middleware
+app.use(express.json());
+
+// Routes
+app.use('/api/users', require('./routes/users'));
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/products', require('./routes/products'));
+app.use('/api/reviews', require('./routes/reviews'));
+
+// Start Server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
+
+const UserSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    isSeller: { type: Boolean, default: false },
+    profilePicture: { type: String, default: "" },
+}, { timestamps: true });
+
+// Password hashing middleware
+UserSchema.pre('save', async function (next) {
+    if (!this.isModified('password')) return next();
+    this.password = await bcrypt.hash(this.password, 10);
+    next();
+});
+
+module.exports = mongoose.model('User', UserSchema);
+const mongoose = require('mongoose');
+
+const ProductSchema = new mongoose.Schema({
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { type: String, required: true },
+    description: { type: String, required: true },
+    price: { type: Number, required: true },
+    images: { type: [String], required: true },
+    category: { type: String, required: true },
+    stock: { type: Number, default: 0 },
+    reviews: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Review' }]
+}, { timestamps: true });
+
+module.exports = mongoose.model('Product', ProductSchema);
+const express = require('express');
+const User = require('../models/User');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const router = express.Router();
+
+// Register
+router.post('/register', async (req, res) => {
+    try {
+        const { username, email, password, isSeller } = req.body;
+        let user = new User({ username, email, password, isSeller });
+        await user.save();
+        res.status(201).send('User registered successfully');
+    } catch (err) {
+        res.status(500).send('Error registering user');
+    }
+});
+
+// Login
+router.post('/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const user = await User.findOne({ email });
+        if (!user) return res.status(400).send('User not found');
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return res.status(400).send('Invalid credentials');
+        const token = jwt.sign({ id: user._id }, 'jwtSecret', { expiresIn: '1h' });
+        res.json({ token });
+    } catch (err) {
+        res.status(500).send('Error logging in');
+    }
+});
+
+module.exports = router;
+const express = require('express');
+const Product = require('../models/Product');
+const multer = require('multer');
+const router = express.Router();
+
+// File upload configuration
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/');
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage: storage });
+
+// Create Product
+router.post('/create', upload.array('images', 5), async (req, res) => {
+    try {
+        const { seller, name, description, price, category, stock } = req.body;
+        const images = req.files.map(file => file.path);
+        let product = new Product({ seller, name, description, price, category, stock, images });
+        await product.save();
+        res.status(201).send('Product created successfully');
+    } catch (err) {
+        res.status(500).send('Error creating product');
+    }
+});
+
+// Get Products
+router.get('/', async (req, res) => {
+    try {
+        const products = await Product.find().populate('seller', 'username');
+        res.json(products);
+    } catch (err) {
+        res.status(500).send('Error fetching products');
+    }
+});
+
+module.exports = router;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Marketplace</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="root"></div>
+    <script src="bundle.js"></script>
+</body>
+</html>
+import React, { useEffect, useState } from 'react';
+import axios from 'axios';
+
+function App() {
+    const [products, setProducts] = useState([]);
+
+    useEffect(() => {
+        async function fetchProducts() {
+            const { data } = await axios.get('/api/products');
+            setProducts(data);
+        }
+        fetchProducts();
+    }, []);
+
+    return (
+        <div>
+            <h1>Online Marketplace</h1>
+            <div className="products">
+                {products.map(product => (
+                    <div key={product._id} className="product">
+                        <h2>{product.name}</h2>
+                        <p>{product.description}</p>
+                        <p>${product.price}</p>
+                        <img src={product.images[0]} alt={product.name} />
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+export default App;
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f4;
+    margin: 0;
+    padding: 0;
+}
+
+h1 {
+    text-align: center;
+    margin-top: 20px;
+}
+
+.products {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.product {
+    border: 1px solid #ddd;
+    padding: 20px;
+    margin: 10px;
+    width: 200px;
+    text-align: center;
+}
+
+.product img {
+    width: 100%;
+    height: auto;
+}
